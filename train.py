@@ -48,9 +48,11 @@ def main(args):
   DataLoader = {'cifar': cifar10_data.DataLoader,
                 'imagenet': imagenet_data.DataLoader}[args.data_set]
   train_data = DataLoader(args.data_dir, 'train', args.batch_size,
-                          rng=rng, shuffle=True, return_labels=args.class_conditional)
+                          rng=rng, shuffle=True, return_labels=args.class_conditional,
+                          nex=nex)
   test_data = DataLoader(args.data_dir, 'test', args.batch_size,
-                         shuffle=False, return_labels=args.class_conditional)
+                         shuffle=False, return_labels=args.class_conditional,
+                         nex=nex)
   obs_shape = train_data.get_observation_size()  # e.g. a tuple (32,32,3)
   assert len(obs_shape) == 3, 'assumed right now'
 
@@ -220,7 +222,7 @@ def main(args):
 
   # init & save
   initializer = tf.global_variables_initializer()
-  saver = tf.train.Saver()
+  saver = tf.train.Saver(max_to_keep=2)
 
   # turn numpy inputs into feed_dict for use with tensorflow
   def make_feed_dict(data, init=False):
@@ -329,6 +331,9 @@ if __name__ == '__main__':
   import os.path as osp
 
   parser = argparse.ArgumentParser()
+
+  # DK - TODO
+  parser.add_argument('--nex', type=int, default=None)
 
   # data I/O
   parser.add_argument('-i', '--data_dir', type=str, default='./data',
