@@ -1,3 +1,4 @@
+#!/usr/bin/env python3 
 """
 Trains a SNAIL generative model on CIFAR-10 or Tiny ImageNet data.
 Supports using multiple GPUs and machines (the latter using MPI).
@@ -49,10 +50,10 @@ def main(args):
                 'imagenet': imagenet_data.DataLoader}[args.data_set]
   train_data = DataLoader(args.data_dir, 'train', args.batch_size,
                           rng=rng, shuffle=True, return_labels=args.class_conditional,
-                          nex=nex)
+                          nex=args.nex)
   test_data = DataLoader(args.data_dir, 'test', args.batch_size,
                          shuffle=False, return_labels=args.class_conditional,
-                         nex=nex)
+                         nex=args.nex)
   obs_shape = train_data.get_observation_size()  # e.g. a tuple (32,32,3)
   assert len(obs_shape) == 3, 'assumed right now'
 
