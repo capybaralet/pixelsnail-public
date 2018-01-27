@@ -54,12 +54,20 @@ def main(args):
         raise("We currently don't have labels for the small imagenet data set")
     DataLoader = {'cifar': cifar10_data.DataLoader,
                                 'imagenet': imagenet_data.DataLoader}[args.data_set]
-    train_data = DataLoader(args.data_dir, 'train', args.batch_size,
-                                                    rng=rng, shuffle=True, return_labels=args.class_conditional,
-                                                    n_ex=args.n_ex)
-    test_data = DataLoader(args.data_dir, 'test', args.batch_size,
-                                                 shuffle=False, return_labels=args.class_conditional,
-                                                 n_ex=args.n_ex)
+    if use_valid:
+        train_data = DataLoader(args.data_dir, 'train_', args.batch_size,
+                                                        rng=rng, shuffle=True, return_labels=args.class_conditional,
+                                                        n_ex=args.n_ex)
+        test_data = DataLoader(args.data_dir, 'valid_', args.batch_size,
+                                                     shuffle=False, return_labels=args.class_conditional,
+                                                     n_ex=args.n_ex)
+    else:
+        train_data = DataLoader(args.data_dir, 'train', args.batch_size,
+                                                        rng=rng, shuffle=True, return_labels=args.class_conditional,
+                                                        n_ex=args.n_ex)
+        test_data = DataLoader(args.data_dir, 'test', args.batch_size,
+                                                     shuffle=False, return_labels=args.class_conditional,
+                                                     n_ex=args.n_ex)
     obs_shape = train_data.get_observation_size()    # e.g. a tuple (32,32,3)
     assert len(obs_shape) == 3, 'assumed right now'
 
@@ -145,6 +153,7 @@ def main(args):
     ema = tf.train.ExponentialMovingAverage(decay=args.polyak_decay)
     maintain_averages_op = tf.group(ema.apply(all_params))
 
+    # TODO: loss: sum vs. mean; reduce_sum log_dets, +/-log_dets
     loss_gen, loss_gen_test, grads = [], [], []
     for i in range(args.nr_gpu):
         with tf.device('/gpu:%d' % i):
@@ -159,7 +168,7 @@ def main(args):
                     loss_gen.append(nn.discretized_mix_logistic_loss(x, gen_par))
             else:
                 u, log_dets = gen_par
-                loss_gen.append(tf.reduce_sum(u**2) - log_dets) # TODO: +/- log_dets????
+                loss_gen.append(tf.reduce_mean(tf.reduce_sum(u**2, axis=-1) - log_dets))
             grads.append(tf.gradients(loss_gen[i], all_params))
 
             x = qr.test.batch().x
@@ -172,7 +181,7 @@ def main(args):
                     loss_gen_test.append(nn.discretized_mix_logistic_loss(x, gen_par))
             else:
                 u, log_dets = gen_par
-                loss_gen_test.append(tf.reduce_sum(u**2) - log_dets) # TODO: +/- log_dets????
+                loss_gen_test.append(tf.reduce_mean(tf.reduce_sum(u**2, axis=-1) - log_dets))
 
 
     # add losses and gradients together and get training updates
@@ -374,6 +383,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_ex', type=int, default=48)
     parser.add_argument('--n_flows', type=int, default=2)
     parser.add_argument('--n_flow_params', type=int, default=24)
+    parser.add_argument('--use_valid', type=int, default=1)
     # DK (modified)
     parser.add_argument('--model', type=str, default="dk_DSF1", # alias for "h12_noup_smallkey"
             choices=["dk_CNN", "dk_IAF", "dk_DSF1"], 
