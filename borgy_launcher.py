@@ -31,21 +31,19 @@ username = 'david.krueger'
 
 exp_description = 'test_pixelSNAIL'
 
+# TODO: add model option here!
 if __name__ == "__main__":
     params = dict(
-        data_set="cifar",
-        model="h12_pool2_smallkey",
-        nr_logistic_mix=10,
-        nr_filters=256,
-        #batch_size=8,
-        #init_batch_size=8,
+        #data_set="cifar",
+        #model="h12_noup_smallkey",
+        model="dk_DSF",
+        #nr_logistic_mix=10,
+        #nr_filters=256,
         batch_size=8,
         init_batch_size=8,
-        dropout_p=0.5,
-        polyak_decay=0.9995,
-        save_interval=1,
         #
-        nex=100,
+        save_interval=1,
+        n_ex=100,
     )
 
     parser = argparse.ArgumentParser()

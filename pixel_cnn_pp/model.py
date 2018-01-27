@@ -7,6 +7,186 @@ from tensorflow.contrib.framework.python.ops import arg_scope
 import pixel_cnn_pp.nn as nn
 
 
+# TODO: understand the gradient flow a bit better, and the thing about the Jacobian of AR being 0s except above the diagonal
+
+def IAF(x, AR_x):
+    """ 
+    modified from Alex
+
+    x: the variable to be transformed (B, N)
+    AR_x: output of, e.g. MADE (B, N, n_flow_params)
+        for IAF, n_flow_params = 2; the params are (mu, pre_sigma)
+    """
+    AR_x.reshape(x.shape + (-1)) # get mu and sigma in the last axis
+    mu, pre_sigma = tf.unstack(AR_x, axis=2)
+    mu.shape.assert_is_compatible_with(x.shape)
+    pre_sigma += 3.  # favors transparency of the layers.
+    sigma = tf.sigmoid(pre_sigma)
+    x = sigma * x + (1 - sigma) * mu
+    log_sigma = log_sigmoid_from_logits(pre_sigma)  # this is numerically more stable than tf.log(sigma)
+    log_det = tf.reduce_sum(log_sigma, axis=1)
+    return x, log_det
+
+def DSF1(x, AR_x):
+    """ 
+    modified from Alex
+
+    x: the variable to be transformed (B, N)
+    AR_x: output of, e.g. MADE (B, N, n_flow_params)
+        for DSF1.0, n_flow_params = 3 * n_sigmoid_units
+    """
+    epsilon = 1e-6
+
+    # z_dim == N
+    x_shp = x.shape.as_list()
+
+    # extract flow params
+    AR_x = tf.reshape(AR_x, x_shp + (-1, 3))
+    pre_a, b, w_logits = tf.unstack(AR_x, axis=3)
+    # TODO: what's all this then?
+    b *= 5.
+    w_logits *= 5.
+    pre_a *= 5.
+
+    a = tf.nn.softplus(pre_a)
+    w = tf.nn.softmax(w_logits, dim=2)
+
+    # calculate forward
+    pre_sigmoid = a * tf.reshape(x, x_shp + (1,)) + b
+    pre_x = tf.reduce_sum(w * tf.nn.sigmoid(pre_sigmoid), axis=2)
+    pre_x.shape.assert_is_compatible_with(x.shape)
+    pre_x = pre_x * (1 - epsilon) + epsilon * 0.5
+    x = tf.log(pre_x / (1 - pre_x))  # - tf.log(1. - pre_x)
+
+    # Calculate log_det
+    def log_sigmoid_from_logits(logits):
+        return -tf.nn.softplus(-logits)
+    log_j = tf.nn.log_softmax(w_logits, dim=2) + log_sigmoid_from_logits(pre_sigmoid) + log_sigmoid_from_logits(-pre_sigmoid) + tf.log(a)
+    log_j = tf.reduce_logsumexp(log_j, axis=2)
+    log_j.shape.assert_is_compatible_with(pre_x.shape)
+    log_det = log_j - x + np.log(1. - epsilon)
+
+    return x, tf.reduce_sum(log_det, axis=1)
+
+def pixelSNAIL_MAF(x, log_dets=0,
+        h=None, init=False, ema=None, dropout_p=0.5, # these are modified for different copies of the template
+        nr_resnet=4, nr_filters=256, attn_rep=12, att_downsample=1, resnet_nonlinearity='elu', # these settings stay fixed (kwargs ugliness...)
+        n_flow_params=48, # new argument, replacing nr_logistic_mix
+        #
+        flow='DSF1',
+        n_flows=2, # new argument
+        scope=None, # from Alex's code
+        ):
+
+    if flow == 'IAF':
+        assert n_flow_params == 2
+    if flow == 'DSF1': 
+        assert n_flow_params % 3 == 0
+
+    with tf.variable_scope(scope, "pixelSNAIL_" + flow, [x]):
+        for _ in range(n_flows):
+            AR_x = _dk_base_noup_smallkey_spec(x, h=h, init=init, ema=ema, dropout_p=dropout_p,
+                            nr_resnet=nr_resnet, nr_filters=nr_filters, attn_rep=attn_rep, att_downsample=att_downsample, resnet_nonlinearity=resnet_nonlinearity, 
+                            n_out=n_flow_params)
+
+            x_shp = x.shape.as_list()
+
+            # flatten x, AR_x
+            x = x.reshape((x_shp[0], -1))
+            AR_x = AR_x.reshape((x_shp[0], -1))
+            # reshape AR_x as (B, N, n_params)
+            AR_x = AR_x.reshape(x.shape.as_list() + (-1,))
+
+            if flow == 'IAF':
+                x, log_det = IAF(x, AR_x)
+            elif flow == 'DSF1':
+                x, log_det = DSF1(x, AR_x)
+
+            # undo the flattening
+            x.reshape(x_shp)
+
+            log_dets += log_det
+
+    return x, log_dets
+
+dk_IAF_spec = functools.partial(pixelSNAIL_MAF, flow='IAF')
+dk_DSF1_spec = functools.partial(pixelSNAIL_MAF, flow='DSF1')
+
+
+# TODO: rm
+def OLD_pixelSNAIL_DSF(z, log_dets=0,
+        h=None, init=False, ema=None, dropout_p=0.5, # these are modified for different copies of the template
+        nr_resnet=4, nr_filters=256, attn_rep=12, att_downsample=1, resnet_nonlinearity='elu', # these settings stay fixed (kwargs ugliness...)
+        n_out=2, # new argument, replacing nr_logistic_mix
+        #
+        n_flows=2, # new argument
+        scope=None, # from Alex's code
+        ):
+    """
+    Deep sigmoidal flow (DSF) using pixelSNAIL for autoregressive part.
+
+                # this class is sort of a merger of dsf_layer() and _dk_base_noup_smallkey_spec()...
+                # it mostly has the API of the 2nd, but with a few other things to specify the DSF stuff...
+    
+    A normalizing flow transforms x_old into x_new (here these are called z/x, respectively)
+    x_new = f(x_old) = g(x_old, AR(x_old))
+    with:
+        AR: an autoregressive model (here, pixelSNAIL)
+        g: a bijection (for DSF, g is a monotonic-MLP (is MMLP a good acroynm?))
+
+    AR is used to produce the parameters of g.
+
+    This function stitches together multiple flows, and can implement MAF or IAF.
+        MAF: the input (z) would be the observed data (x)
+        IAF: the input (z) would be random noise variable (u)
+    """
+
+    with tf.variable_scope(scope, "dsf", [z]):
+        epsilon = 1e-6
+        n_params = n_sigmoid_units * 3
+
+        x = z # for looping over the SNAILs
+
+        for _ in range(n_flows):
+            flow_params = _dk_base_noup_smallkey_spec(x, h=h, init=init, ema=ema, dropout_p=dropout_p,
+                            nr_resnet=nr_resnet, nr_filters=nr_filters, attn_rep=attn_rep, att_downsample=att_downsample, resnet_nonlinearity=resnet_nonlinearity, 
+                            n_out=n_out)
+            # TODO 
+            flow_params.shape.assert_is_compatible_with(x.shape[:-1] + (n_params,))
+
+            # Get variables
+            # h = tf.Print(h, tf.nn.moments(h, [0,1,2]))
+            #h = tf.reshape(h, (-1, z_dim, n_sigmoid_units, 3))
+            flow_params = tf.reshape(flow_params, x.shape[:-1] + (n_sigmoid_units, 3))
+            pre_a, b, w_logits = tf.unstack(flow_params, axis=-1)
+            # pre_a = tf.Print(pre_a, [pre_a, b, w_logits])
+            b *= 5.
+            w_logits *= 5.
+            pre_a *= 5.
+
+            a = tf.nn.softplus(pre_a)
+            w = tf.nn.softmax(w_logits, dim=-1)
+            a.shape.assert_is_compatible_with(b.shape)
+            a.shape.assert_is_compatible_with(w.shape)
+
+            # calculate forward
+            #pre_sigmoid = a * tf.reshape(z, (-1, z_dim, 1)) + b
+            pre_sigmoid = a * tf.reshape(x, x.shape + (1,)) + b
+            pre_x = tf.reduce_sum(w * tf.nn.sigmoid(pre_sigmoid), axis=-1)
+            pre_x.shape.assert_is_compatible_with(x.shape)
+            pre_x = pre_x * (1 - epsilon) + epsilon * 0.5
+            x = tf.log(pre_x / (1 - pre_x))  # - tf.log(1. - pre_x)
+
+            # Calculate log_det (TODO)
+            log_j = tf.nn.log_softmax(w_logits, dim=2) + log_sigmoid_from_logits(pre_sigmoid) + log_sigmoid_from_logits(-pre_sigmoid) + tf.log(a)
+            log_j = tf.reduce_logsumexp(log_j, axis=2)
+            log_j.shape.assert_is_compatible_with(pre_x.shape)
+            log_det = log_j - x + np.log(1. - epsilon)
+            log_dets -= tf.reduce_sum(log_det, axis=1)
+
+    return x, log_dets
+
+
 def model_spec(x, h=None, init=False, ema=None, dropout_p=0.5, nr_resnet=5, nr_filters=160, nr_logistic_mix=10, resnet_nonlinearity='concat_elu'):
     """
     We receive a Tensor x of shape (N,H,W,D1) (e.g. (12,32,32,3)) and produce
@@ -865,6 +1045,72 @@ def h8_noup_1mix_halfattn_spec(x, h=None, init=False, ema=None, dropout_p=0.5, n
 
             return x_out
 
+# DK
+# I replace 10 * nr_logistic_mix with n_out
+# for IAF, n_out = 2
+# for DSF, n_out is a hparam
+def _dk_base_noup_smallkey_spec(x, h=None, init=False, ema=None, dropout_p=0.5, nr_resnet=5, nr_filters=256, attn_rep=12, n_out=2, att_downsample=1, resnet_nonlinearity='concat_elu'):
+    """
+    We receive a Tensor x of shape (N,H,W,D1) (e.g. (12,32,32,3)) and produce
+    a Tensor x_out of shape (N,H,W,D2) (e.g. (12,32,32,100)), where each fiber
+    of the x_out tensor describes the predictive distribution for the RGB at
+    that position.
+    'h' is an optional N x K matrix of values to condition our generative model on
+    """
+
+    counters = {}
+    with arg_scope([nn.conv2d, nn.deconv2d, nn.gated_resnet, nn.dense, nn.nin], counters=counters, init=init, ema=ema, dropout_p=dropout_p):
+
+        # parse resnet nonlinearity argument
+        if resnet_nonlinearity == 'concat_elu':
+            resnet_nonlinearity = nn.concat_elu
+        elif resnet_nonlinearity == 'elu':
+            resnet_nonlinearity = tf.nn.elu
+        elif resnet_nonlinearity == 'relu':
+            resnet_nonlinearity = tf.nn.relu
+        else:
+            raise('resnet nonlinearity ' +
+                  resnet_nonlinearity + ' is not supported')
+
+        with arg_scope([nn.gated_resnet], nonlinearity=resnet_nonlinearity, h=h):
+
+            # ////////// up pass through pixelCNN ////////
+            xs = nn.int_shape(x)
+            background = tf.concat(
+                    [
+                        ((tf.range(xs[1], dtype=tf.float32) - xs[1] / 2) / xs[1])[None, :, None, None] + 0. * x,
+                        ((tf.range(xs[2], dtype=tf.float32) - xs[2] / 2) / xs[2])[None, None, :, None] + 0. * x,
+                    ],
+                    axis=3
+                    )
+            # add channel of ones to distinguish image from padding later on
+            x_pad = tf.concat([x, tf.ones(xs[:-1] + [1])], axis=3)
+
+            ul_list = [nn.down_shift(nn.down_shifted_conv2d(x_pad, num_filters=nr_filters, filter_size=[1, 3])) +
+                       nn.right_shift(nn.down_right_shifted_conv2d(x_pad, num_filters=nr_filters, filter_size=[2, 1]))]  # stream for up and to the left
+
+            for attn_rep in range(attn_rep):
+                for rep in range(nr_resnet):
+                    ul_list.append(nn.gated_resnet(
+                        ul_list[-1], conv=nn.down_right_shifted_conv2d))
+
+                ul = ul_list[-1]
+                raw_content = tf.concat([x, ul, background], axis=3)
+                q_size = 16
+                raw = nn.nin(nn.gated_resnet(raw_content, conv=nn.nin), nr_filters // 2 + q_size)
+                key, mixin = raw[:, :, :, :q_size], raw[:, :, :, q_size:]
+                raw_q = tf.concat([ul, background], axis=3)
+                query = nn.nin(nn.gated_resnet(raw_q, conv=nn.nin), q_size)
+                mixed = nn.causal_attention(key, mixin, query, downsample=att_downsample)
+
+                ul_list.append(nn.gated_resnet(ul, mixed, conv=nn.nin))
+
+
+            x_out = nn.nin(tf.nn.elu(ul_list[-1]), n_out)
+
+            return x_out
+
+
 def _base_noup_smallkey_spec(x, h=None, init=False, ema=None, dropout_p=0.5, nr_resnet=5, nr_filters=256, attn_rep=12, nr_logistic_mix=10, att_downsample=1, resnet_nonlinearity='concat_elu'):
     """
     We receive a Tensor x of shape (N,H,W,D1) (e.g. (12,32,32,3)) and produce
@@ -1067,6 +1313,7 @@ h12_noup_smallkey_spec = functools.partial(_base_noup_smallkey_spec, attn_rep=12
 h12_pool2_smallkey_spec = functools.partial(_base_noup_smallkey_spec, attn_rep=12, att_downsample=2)
 h8_noup_smallkey_spec = functools.partial(_base_noup_smallkey_spec, attn_rep=8)
 
+dk_CNN = h12_noup_smallkey_spec 
 
 
 def _base_noup_smallkey_spec_ar_chs(x, h=None, init=False, ema=None, dropout_p=0.5, nr_resnet=5, nr_filters=256, attn_rep=12, nr_logistic_mix=10, att_downsample=1, resnet_nonlinearity='concat_elu'):
