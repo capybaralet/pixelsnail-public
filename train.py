@@ -210,7 +210,7 @@ def main(args):
     total_gpus = sum(comm.allgather(args.nr_gpu))
     lprint('using %d gpus across %d machines' % (total_gpus, num_tasks))
     norm_const = np.log(2.) * np.prod(obs_shape) * args.batch_size
-    norm_const *  total_gpus / num_tasks
+    norm_const *= total_gpus / num_tasks
     bits_per_dim = loss_gen[0] / norm_const
     bits_per_dim_test = loss_gen_test[0] / norm_const
 
