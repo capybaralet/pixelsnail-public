@@ -121,7 +121,7 @@ def main(args):
 
     # create the model
     # TODO: don't use kwargs!?!?
-    if model == "dk_CNN":
+    if args.model == "dk_CNN":
         model_opt = {'nr_resnet': args.nr_resnet, 'nr_filters': args.nr_filters,
                                  'nr_logistic_mix': args.nr_logistic_mix, 'resnet_nonlinearity': args.resnet_nonlinearity}
     else:
@@ -357,7 +357,7 @@ def main(args):
             np.savetxt(train_bpd, os.path.join(save_dir, args.model + 'train_bpd.txt'))
 
         # TODO: sampling from MAF
-        if args.model="dk_CNN":
+        if args.model=="dk_CNN":
             sample_from_model(sess)
 
 

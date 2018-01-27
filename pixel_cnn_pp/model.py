@@ -1313,7 +1313,7 @@ h12_noup_smallkey_spec = functools.partial(_base_noup_smallkey_spec, attn_rep=12
 h12_pool2_smallkey_spec = functools.partial(_base_noup_smallkey_spec, attn_rep=12, att_downsample=2)
 h8_noup_smallkey_spec = functools.partial(_base_noup_smallkey_spec, attn_rep=8)
 
-dk_CNN = h12_noup_smallkey_spec 
+dk_CNN_spec = h12_noup_smallkey_spec 
 
 
 def _base_noup_smallkey_spec_ar_chs(x, h=None, init=False, ema=None, dropout_p=0.5, nr_resnet=5, nr_filters=256, attn_rep=12, nr_logistic_mix=10, att_downsample=1, resnet_nonlinearity='concat_elu'):

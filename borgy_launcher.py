@@ -29,14 +29,14 @@ cd $(ls | tail -1)
 
 username = 'david.krueger'
 
-exp_description = 'test_pixelSNAIL'
+exp_description = 'test_pixelSNAIL_DSF'
 
 # TODO: add model option here!
 if __name__ == "__main__":
     params = dict(
         #data_set="cifar",
         #model="h12_noup_smallkey",
-        model="dk_DSF",
+        model="dk_DSF1",
         #nr_logistic_mix=10,
         #nr_filters=256,
         batch_size=8,
@@ -44,6 +44,7 @@ if __name__ == "__main__":
         #
         save_interval=1,
         n_ex=100,
+        data_dir="/mnt/AIDATA/home/david.krueger/data/",
     )
 
     parser = argparse.ArgumentParser()
@@ -62,10 +63,12 @@ if __name__ == "__main__":
         "-e", "PYTHONPATH=%s" % repo_path, # -e : environment variable
         #"-e", "DATA_PATH=/mnt/AIDATA/datasets",
         "-v", "/mnt/AIDATA:/mnt/AIDATA", # make this directory visible inside the docker
-        #"-v", "/mnt/AIDATA/home/david.krueger/dev/pixelsnail-public:/mnt/AIDATA/home/david.krueger/dev/pixelsnail-public", # make this directory visible inside the docker
-        "--req-cores=12",
-        "--req-gpus=4",
-        "--req-ram-gbytes=40"]
+        "--req-cores=6",
+        "--req-gpus=2",
+        "--req-ram-gbytes=12"]
+
+    print ((" ").join(borgy_args))
+    #assert False
 
     cmd = os.path.join(repo_path, "train.py")
 
