@@ -54,7 +54,7 @@ def main(args):
         raise("We currently don't have labels for the small imagenet data set")
     DataLoader = {'cifar': cifar10_data.DataLoader,
                                 'imagenet': imagenet_data.DataLoader}[args.data_set]
-    if use_valid:
+    if args.use_valid:
         train_data = DataLoader(args.data_dir, 'train_', args.batch_size,
                                                         rng=rng, shuffle=True, return_labels=args.class_conditional,
                                                         n_ex=args.n_ex)
