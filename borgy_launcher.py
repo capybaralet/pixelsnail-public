@@ -29,10 +29,11 @@ cd $(ls | tail -1)
 
 username = 'david.krueger'
 
-exp_description = 'test_pixelSNAIL_DSF'
+exp_description = 'test_pixelSNAIL_DSF1'
 
 # TODO: add model option here!
 if __name__ == "__main__":
+    # FIXME: these aren't being used ATM (because of sshfs weirdness...)
     params = dict(
         #data_set="cifar",
         #model="h12_noup_smallkey",

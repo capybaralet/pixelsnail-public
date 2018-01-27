@@ -159,7 +159,7 @@ def main(args):
                     loss_gen.append(nn.discretized_mix_logistic_loss(x, gen_par))
             else:
                 u, log_dets = gen_par
-                loss_gen_test.append(tf.reduce_sum(u**2) - log_dets) # TODO: +/- log_dets????
+                loss_gen.append(tf.reduce_sum(u**2) - log_dets) # TODO: +/- log_dets????
             grads.append(tf.gradients(loss_gen[i], all_params))
 
             x = qr.test.batch().x
@@ -353,8 +353,8 @@ def main(args):
                 path = os.path.join(save_dir, str(epoch))
                 os.makedirs(path, exist_ok=True)
                 saver.save(sess, os.path.join(path, 'params_%s.ckpt' % args.data_set))
-            np.savetxt(test_bpd, os.path.join(save_dir, args.model + 'test_bpd.txt'))
-            np.savetxt(train_bpd, os.path.join(save_dir, args.model + 'train_bpd.txt'))
+            np.savetxt(os.path.join(save_dir, args.model + 'test_bpd.txt'), test_bpd, fmt='%1.3f')
+            np.savetxt(os.path.join(save_dir, args.model + 'train_bpd.txt'), train_bpd, fmt='%1.3f')
 
         # TODO: sampling from MAF
         if args.model=="dk_CNN":
@@ -370,19 +370,19 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
 
-    # DK
-    parser.add_argument('--n_ex', type=int, default=None)
-    parser.add_argument('--n_flows', type=int, default=None)
-    parser.add_argument('--n_flow_params', type=int, default=None)
+    # DK (TODO: restore defaults!)
+    parser.add_argument('--n_ex', type=int, default=48)
+    parser.add_argument('--n_flows', type=int, default=2)
+    parser.add_argument('--n_flow_params', type=int, default=24)
     # DK (modified)
-    parser.add_argument('--model', type=str, default="dk_CNN", # alias for "h12_noup_smallkey"
+    parser.add_argument('--model', type=str, default="dk_DSF1", # alias for "h12_noup_smallkey"
             choices=["dk_CNN", "dk_IAF", "dk_DSF1"], 
                                             help='name of the model')
 
     # data I/O
-    parser.add_argument('-i', '--data_dir', type=str, default='./data',
+    parser.add_argument('-i', '--data_dir', type=str, default="/mnt/AIDATA/home/david.krueger/data/",
                                             help='Location for the dataset')
-    parser.add_argument('-o', '--save_dir', type=str, default='./data/save',
+    parser.add_argument('-o', '--save_dir', type=str, default='./save',
                                             help='Location for parameter checkpoints and samples')
     parser.add_argument('-d', '--data_set', type=str, default='cifar',
                                             help='Can be either cifar|imagenet')
@@ -394,9 +394,9 @@ if __name__ == '__main__':
     # model
     #parser.add_argument('--model', type=str, default="dk_CNN", # alias for "h12_noup_smallkey"
     #                                        help='name of the model')
-    parser.add_argument('-q', '--nr_resnet', type=int, default=4,
+    parser.add_argument('-q', '--nr_resnet', type=int, default=2, # TODO: restore
                                             help='Number of residual blocks per stage of the model')
-    parser.add_argument('-n', '--nr_filters', type=int, default=256,
+    parser.add_argument('-n', '--nr_filters', type=int, default=32, # TODO: restore
                                             help='Number of filters to use across the model. Higher = larger model.')
     parser.add_argument('-m', '--nr_logistic_mix', type=int, default=10,
                                             help='Number of logistic components in the mixture. Higher = more flexible model')

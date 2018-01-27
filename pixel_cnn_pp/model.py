@@ -6,6 +6,8 @@ import tensorflow as tf
 from tensorflow.contrib.framework.python.ops import arg_scope
 import pixel_cnn_pp.nn as nn
 
+import numpy as np
+
 
 # TODO: understand the gradient flow a bit better, and the thing about the Jacobian of AR being 0s except above the diagonal
 
@@ -17,7 +19,7 @@ def IAF(x, AR_x):
     AR_x: output of, e.g. MADE (B, N, n_flow_params)
         for IAF, n_flow_params = 2; the params are (mu, pre_sigma)
     """
-    AR_x.reshape(x.shape + (-1)) # get mu and sigma in the last axis
+    tf.reshape(AR_x, x.shape + [-1]) # get mu and sigma in the last axis
     mu, pre_sigma = tf.unstack(AR_x, axis=2)
     mu.shape.assert_is_compatible_with(x.shape)
     pre_sigma += 3.  # favors transparency of the layers.
@@ -41,7 +43,7 @@ def DSF1(x, AR_x):
     x_shp = x.shape.as_list()
 
     # extract flow params
-    AR_x = tf.reshape(AR_x, x_shp + (-1, 3))
+    AR_x = tf.reshape(AR_x, x_shp + [-1, 3])
     pre_a, b, w_logits = tf.unstack(AR_x, axis=3)
     # TODO: what's all this then?
     b *= 5.
@@ -52,7 +54,7 @@ def DSF1(x, AR_x):
     w = tf.nn.softmax(w_logits, dim=2)
 
     # calculate forward
-    pre_sigmoid = a * tf.reshape(x, x_shp + (1,)) + b
+    pre_sigmoid = a * tf.reshape(x, x_shp + [1,]) + b
     pre_x = tf.reduce_sum(w * tf.nn.sigmoid(pre_sigmoid), axis=2)
     pre_x.shape.assert_is_compatible_with(x.shape)
     pre_x = pre_x * (1 - epsilon) + epsilon * 0.5
@@ -68,34 +70,42 @@ def DSF1(x, AR_x):
 
     return x, tf.reduce_sum(log_det, axis=1)
 
-def pixelSNAIL_MAF(x, log_dets=0,
+def pixelSNAIL_MAF(x,
         h=None, init=False, ema=None, dropout_p=0.5, # these are modified for different copies of the template
         nr_resnet=4, nr_filters=256, attn_rep=12, att_downsample=1, resnet_nonlinearity='elu', # these settings stay fixed (kwargs ugliness...)
         n_flow_params=48, # new argument, replacing nr_logistic_mix
         #
         flow='DSF1',
         n_flows=2, # new argument
-        scope=None, # from Alex's code
+        #scope=None, # from Alex's code
         ):
+
+    scope = None # TODO: make sure this is OK
+    log_dets = tf.constant(0.)
 
     if flow == 'IAF':
         assert n_flow_params == 2
     if flow == 'DSF1': 
         assert n_flow_params % 3 == 0
 
-    with tf.variable_scope(scope, "pixelSNAIL_" + flow, [x]):
-        for _ in range(n_flows):
+    for n_flow in range(n_flows):
+        with tf.variable_scope(scope, "pixelSNAIL_" + flow + '_flow' + str(n_flow), [x]):
             AR_x = _dk_base_noup_smallkey_spec(x, h=h, init=init, ema=ema, dropout_p=dropout_p,
                             nr_resnet=nr_resnet, nr_filters=nr_filters, attn_rep=attn_rep, att_downsample=att_downsample, resnet_nonlinearity=resnet_nonlinearity, 
-                            n_out=n_flow_params)
+                            n_out=3*n_flow_params) # we need to produce parameters for 3 pixels at once!
 
             x_shp = x.shape.as_list()
+            print ("x_shp", x_shp)
+            #print (x_shp)
 
             # flatten x, AR_x
-            x = x.reshape((x_shp[0], -1))
-            AR_x = AR_x.reshape((x_shp[0], -1))
+            x = tf.reshape(x, (x_shp[0], -1))
+            print (x.shape.as_list())
+            AR_x = tf.reshape(AR_x, (x_shp[0], -1))
+            print (AR_x.shape.as_list())
             # reshape AR_x as (B, N, n_params)
-            AR_x = AR_x.reshape(x.shape.as_list() + (-1,))
+            AR_x = tf.reshape(AR_x, x.shape.as_list() + [-1,])
+            print (AR_x.shape.as_list())
 
             if flow == 'IAF':
                 x, log_det = IAF(x, AR_x)
@@ -103,9 +113,9 @@ def pixelSNAIL_MAF(x, log_dets=0,
                 x, log_det = DSF1(x, AR_x)
 
             # undo the flattening
-            x.reshape(x_shp)
+            x = tf.reshape(x, x_shp)
 
-            log_dets += log_det
+            log_dets = log_dets + log_det
 
     return x, log_dets
 
