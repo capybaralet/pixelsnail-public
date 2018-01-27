@@ -353,8 +353,8 @@ def main(args):
                 path = os.path.join(save_dir, str(epoch))
                 os.makedirs(path, exist_ok=True)
                 saver.save(sess, os.path.join(path, 'params_%s.ckpt' % args.data_set))
-            np.savetxt(os.path.join(save_dir, args.model + 'test_bpd.txt'), test_bpd, fmt='%1.3f')
-            np.savetxt(os.path.join(save_dir, args.model + 'train_bpd.txt'), train_bpd, fmt='%1.3f')
+            np.savetxt(os.path.join(save_dir, args.model + '_test_bpd.txt'), test_bpd, fmt='%1.3f')
+            np.savetxt(os.path.join(save_dir, args.model + '_train_bpd.txt'), train_bpd, fmt='%1.3f')
 
         # TODO: sampling from MAF
         if args.model=="dk_CNN":
