@@ -168,7 +168,7 @@ def main(args):
                     loss_gen.append(nn.discretized_mix_logistic_loss(x, gen_par))
             else:
                 u, log_dets = gen_par
-                loss_gen.append(tf.reduce_mean(tf.reduce_sum(u**2, axis=-1) - log_dets))
+                loss_gen.append(tf.reduce_sum(tf.reduce_mean(u**2, axis=0)) - tf.reduce_mean(log_dets))
             grads.append(tf.gradients(loss_gen[i], all_params))
 
             x = qr.test.batch().x
@@ -181,7 +181,7 @@ def main(args):
                     loss_gen_test.append(nn.discretized_mix_logistic_loss(x, gen_par))
             else:
                 u, log_dets = gen_par
-                loss_gen_test.append(tf.reduce_mean(tf.reduce_sum(u**2, axis=-1) - log_dets))
+                loss_gen_test.append(tf.reduce_sum(tf.reduce_mean(u**2, axis=0)) - tf.reduce_mean(log_dets))
 
 
     # add losses and gradients together and get training updates
