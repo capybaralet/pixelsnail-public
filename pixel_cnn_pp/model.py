@@ -126,61 +126,10 @@ def generic_flow(x,
 
     return x, log_dets
 
-# TODO: rm
-def pixelSNAIL_MAF(x,
-        h=None, init=False, ema=None, dropout_p=0.5, # these are modified for different copies of the template
-        nr_resnet=4, nr_filters=256, attn_rep=12, att_downsample=1, resnet_nonlinearity='elu', # these settings stay fixed (kwargs ugliness...)
-        n_flow_params=48, # new argument, replacing nr_logistic_mix
-        #
-        flow='DSF1',
-        n_flows=2, # new argument
-        #scope=None, # from Alex's code
-        ):
-
-    scope = None # TODO: make sure this is OK
-    log_dets = tf.constant(0.)
-
-    if flow == 'IAF':
-        assert n_flow_params == 2
-    if flow == 'DSF1': 
-        assert n_flow_params % 3 == 0
-
-    for n_flow in range(n_flows):
-        with tf.variable_scope(scope, "pixelSNAIL_" + flow + '_flow' + str(n_flow), [x]):
-            AR_x = _dk_base_noup_smallkey_spec(x, h=h, init=init, ema=ema, dropout_p=dropout_p,
-                            nr_resnet=nr_resnet, nr_filters=nr_filters, attn_rep=attn_rep, att_downsample=att_downsample, resnet_nonlinearity=resnet_nonlinearity, 
-                            n_out=3*n_flow_params) # we need to produce parameters for 3 pixels at once! TODO: is this the bug?
-
-            x_shp = x.shape.as_list()
-            print ("x_shp", x_shp)
-            #print (x_shp)
-
-            # flatten x and AR_x
-            x = tf.reshape(x, (x_shp[0], -1))
-            print (x.shape.as_list())
-            AR_x = tf.reshape(AR_x, (x_shp[0], -1))
-            print (AR_x.shape.as_list())
-
-            # reshape AR_x as (B, N, n_flow_params)
-            AR_x = tf.reshape(AR_x, x.shape.as_list() + [-1,])
-            print (AR_x.shape.as_list())
-
-            if flow == 'IAF':
-                x, log_det = IAF(x, AR_x)
-            elif flow == 'DSF1':
-                x, log_det = DSF1(x, AR_x)
-
-            # undo the flattening
-            x = tf.reshape(x, x_shp)
-
-            log_dets += log_det
-
-    return x, log_dets
-
 dk_IAF_MADE_spec = functools.partial(generic_flow, flow='IAF', AR='MADE')
 dk_DSF1_MADE_spec = functools.partial(generic_flow, flow='DSF1', AR='MADE')
-dk_IAF_spec = functools.partial(pixelSNAIL_MAF, flow='IAF')
-dk_DSF1_spec = functools.partial(pixelSNAIL_MAF, flow='DSF1')
+dk_IAF_spec = functools.partial(generic_flow, flow='IAF', AR='pixelSNAIL')
+dk_DSF1_spec = functools.partial(generic_flow, flow='DSF1', AR='pixelSNAIL')
 
 
 def model_spec(x, h=None, init=False, ema=None, dropout_p=0.5, nr_resnet=5, nr_filters=160, nr_logistic_mix=10, resnet_nonlinearity='concat_elu'):
