@@ -7,9 +7,16 @@ from tensorflow.contrib.framework.python.ops import arg_scope
 import pixel_cnn_pp.nn as nn
 
 import numpy as np
+from dk_made import made
 
 
 # TODO: understand the gradient flow a bit better, and the thing about the Jacobian of AR being 0s except above the diagonal
+
+def lookup_activation_fn(name):
+    if name == 'elu':
+        return tf.nn.elu
+    else:
+        assert False
 
 def log_sigmoid_from_logits(logits):
     return -tf.nn.softplus(-logits)
@@ -71,6 +78,55 @@ def DSF1(x, AR_x):
 
     return x, tf.reduce_sum(log_det, axis=1)
 
+
+# TODO
+# for now, we're preserving the API in train.py, and overloading arguments:
+#   nr_filters -- hidden_layer_size
+#   nr_resnet -- len(hidden_layer_sizes)
+#   etc...
+def generic_flow(x,
+        h=None, init=False, ema=None, dropout_p=0.5, # these are modified for different copies of the template
+        nr_resnet=4, nr_filters=256, attn_rep=12, att_downsample=1, resnet_nonlinearity='elu', # these settings stay fixed (kwargs ugliness...)
+        n_flow_params=48, # new argument, replacing nr_logistic_mix
+        #
+        flow='DSF1',
+        AR='pixelSNAIL',
+        n_flows=2, # new argument
+        #scope=None, # from Alex's code
+        ):
+
+    scope = None # TODO: make sure this is OK
+    log_dets = tf.constant(0.)
+
+    if flow == 'IAF':
+        assert n_flow_params == 2
+        flow_ = IAF
+    elif flow == 'DSF1': 
+        assert n_flow_params % 3 == 0
+        flow_ = DSF1
+
+    for n_flow in range(n_flows):
+        with tf.variable_scope(scope, flow + '_n_flow' + str(n_flow), [x]):
+            x_shp = x.shape.as_list()
+            if AR == 'MADE': 
+                x = tf.reshape(x, (x_shp[0], -1)) # flatten x before applying MADE
+                AR_x = made(x, None, [nr_filters,] * nr_resnet, n_flow_params, lookup_activation_fn(resnet_nonlinearity))
+            elif AR == 'pixelSNAIL': 
+                AR_x = _dk_base_noup_smallkey_spec(x, h=h, init=init, ema=ema, dropout_p=dropout_p,
+                                nr_resnet=nr_resnet, nr_filters=nr_filters, attn_rep=attn_rep, att_downsample=att_downsample, resnet_nonlinearity=resnet_nonlinearity, 
+                                n_out=3*n_flow_params) # we need to produce parameters for 3 pixels at once! TODO: is this the bug?
+                # flatten x and AR_x after applying pixelSNAIL
+                x = tf.reshape(x, (x_shp[0], -1))
+                AR_x = tf.reshape(AR_x, (x_shp[0], -1))
+                # reshape AR_x as (B, N, n_flow_params)
+                AR_x = tf.reshape(AR_x, x.shape.as_list() + [-1,])
+
+            x, log_det = flow_(x, AR_x)
+            log_dets += log_det
+
+    return x, log_dets
+
+# TODO: rm
 def pixelSNAIL_MAF(x,
         h=None, init=False, ema=None, dropout_p=0.5, # these are modified for different copies of the template
         nr_resnet=4, nr_filters=256, attn_rep=12, att_downsample=1, resnet_nonlinearity='elu', # these settings stay fixed (kwargs ugliness...)
@@ -121,6 +177,8 @@ def pixelSNAIL_MAF(x,
 
     return x, log_dets
 
+dk_IAF_MADE_spec = functools.partial(generic_flow, flow='IAF', AR='MADE')
+dk_DSF1_MADE_spec = functools.partial(generic_flow, flow='DSF1', AR='MADE')
 dk_IAF_spec = functools.partial(pixelSNAIL_MAF, flow='IAF')
 dk_DSF1_spec = functools.partial(pixelSNAIL_MAF, flow='DSF1')
 

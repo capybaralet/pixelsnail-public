@@ -60,6 +60,7 @@ def main(args):
                                                         n_ex=args.n_ex)
         test_data = DataLoader(args.data_dir, 'valid_', args.batch_size,
                                                      shuffle=False, return_labels=args.class_conditional,
+                                                     #n_ex=int(.25 * args.n_ex))
                                                      n_ex=args.n_ex)
     else:
         train_data = DataLoader(args.data_dir, 'train', args.batch_size,
@@ -168,7 +169,10 @@ def main(args):
                     loss_gen.append(nn.discretized_mix_logistic_loss(x, gen_par))
             else:
                 u, log_dets = gen_par
-                loss_gen.append(tf.reduce_sum(tf.reduce_mean(u**2, axis=0)) - tf.reduce_mean(log_dets))
+                #loss_gen.append(tf.reduce_sum(tf.reduce_mean(u**2, axis=0)) - tf.reduce_mean(log_dets))
+                loss_gen.append(tf.reduce_sum(u**2) - tf.reduce_sum(log_dets))
+                lprint (u.shape.as_list(), log_dets.shape.as_list())
+            #import pdb; pdb.set_trace()
             grads.append(tf.gradients(loss_gen[i], all_params))
 
             x = qr.test.batch().x
@@ -181,7 +185,8 @@ def main(args):
                     loss_gen_test.append(nn.discretized_mix_logistic_loss(x, gen_par))
             else:
                 u, log_dets = gen_par
-                loss_gen_test.append(tf.reduce_sum(tf.reduce_mean(u**2, axis=0)) - tf.reduce_mean(log_dets))
+                #loss_gen_test.append(tf.reduce_sum(tf.reduce_mean(u**2, axis=0)) - tf.reduce_mean(log_dets))
+                loss_gen_test.append(tf.reduce_sum(u**2) - tf.reduce_sum(log_dets))
 
 
     # add losses and gradients together and get training updates
@@ -218,10 +223,12 @@ def main(args):
     # convert loss to bits/dim
     total_gpus = sum(comm.allgather(args.nr_gpu))
     lprint('using %d gpus across %d machines' % (total_gpus, num_tasks))
+    # TODO: bpd vs. bpp?
     if args.model == 'dk_CNN':
         norm_const = np.log(2.) * np.prod(obs_shape) * args.batch_size
     else:
-        norm_const = np.log(2.)
+        #norm_const = np.log(2.) * np.prod(obs_shape)
+        norm_const = np.log(2.) * np.prod(obs_shape) * args.batch_size
     norm_const *= total_gpus / num_tasks
     bits_per_dim = loss_gen[0] / norm_const
     bits_per_dim_test = loss_gen_test[0] / norm_const
@@ -293,6 +300,7 @@ def main(args):
     # TODO: validation set
     train_bpd = []
     test_bpd = []
+    times = []
     lr = args.learning_rate
 
     # manually retrieve exactly init_batch_size examples
@@ -353,7 +361,8 @@ def main(args):
         test_bpd.append(test_loss_gen)
 
         # log progress to console
-        stats = dict(epoch=epoch, time=time.time() - begin, lr=lr,
+        times.append(time.time() - begin)
+        stats = dict(epoch=epoch, time=times[-1], lr=lr,
                                  train_bpd=train_loss_gen,
                                  test_bpd=test_loss_gen)
         all_stats = comm.gather(stats)
@@ -365,8 +374,10 @@ def main(args):
                 path = os.path.join(save_dir, str(epoch))
                 os.makedirs(path, exist_ok=True)
                 saver.save(sess, os.path.join(path, 'params_%s.ckpt' % args.data_set))
+            # save performance and time info every epoch
             np.savetxt(os.path.join(save_dir, args.model + '_test_bpd.txt'), test_bpd, fmt='%1.3f')
             np.savetxt(os.path.join(save_dir, args.model + '_train_bpd.txt'), train_bpd, fmt='%1.3f')
+            np.savetxt(os.path.join(save_dir, args.model + '_times.txt'), times, fmt='%1.0f')
 
         # TODO: sampling from MAF
         if args.model=="dk_CNN":
@@ -383,13 +394,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # DK (TODO: restore defaults!)
-    parser.add_argument('--n_ex', type=int, default=16)
-    parser.add_argument('--n_flows', type=int, default=1)
+    parser.add_argument('--n_ex', type=int, default=900)
+    parser.add_argument('--n_flows', type=int, default=2)
     parser.add_argument('--n_flow_params', type=int, default=2)
     parser.add_argument('--use_valid', type=int, default=1)
     # DK (modified)
     parser.add_argument('--model', type=str, default="dk_IAF",
-            choices=["dk_CNN", "dk_IAF", "dk_DSF1"], 
+            choices=["dk_CNN", "dk_IAF", "dk_DSF1", "dk_IAF_MADE", "dk_DSF1_MADE"], 
                                             help='name of the model')
 
     # data I/O
@@ -399,7 +410,7 @@ if __name__ == '__main__':
                                             help='Location for parameter checkpoints and samples')
     parser.add_argument('-d', '--data_set', type=str, default='cifar',
                                             help='Can be either cifar|imagenet')
-    parser.add_argument('-t', '--save_interval', type=int, default=100, #  # TODO: restore
+    parser.add_argument('-t', '--save_interval', type=int, default=10,
                                             help='Every how many epochs to write checkpoint/samples?')
     parser.add_argument('-r', '--load_params', type=str,
                                             help='Restore training from previous model checkpoint?')
@@ -407,9 +418,9 @@ if __name__ == '__main__':
     # model
     #parser.add_argument('--model', type=str, default="dk_CNN", # alias for "h12_noup_smallkey"
     #                                        help='name of the model')
-    parser.add_argument('-q', '--nr_resnet', type=int, default=2, # TODO: restore
+    parser.add_argument('-q', '--nr_resnet', type=int, default=2,
                                             help='Number of residual blocks per stage of the model')
-    parser.add_argument('-n', '--nr_filters', type=int, default=32, # TODO: restore
+    parser.add_argument('-n', '--nr_filters', type=int, default=256,
                                             help='Number of filters to use across the model. Higher = larger model.')
     parser.add_argument('-m', '--nr_logistic_mix', type=int, default=10,
                                             help='Number of logistic components in the mixture. Higher = more flexible model')
@@ -422,9 +433,9 @@ if __name__ == '__main__':
                                             default=1e-3, help='Base learning rate')
     parser.add_argument('-e', '--lr_decay', type=float, default=0.999998,
                                             help='Learning rate decay, applied every step of the optimization')
-    parser.add_argument('-b', '--batch_size', type=int, default=8,
+    parser.add_argument('-b', '--batch_size', type=int, default=6, # TODO: restore
                                             help='Batch size during training per GPU')
-    parser.add_argument('-a', '--init_batch_size', type=int, default=8,
+    parser.add_argument('-a', '--init_batch_size', type=int, default=6, # TODO: restore
                                             help='How much data to use for data-dependent initialization.')
     parser.add_argument('-p', '--dropout_p', type=float, default=0.5,
                                             help='Dropout strength (i.e. 1 - keep_prob). 0 = No dropout, higher = more dropout.')
