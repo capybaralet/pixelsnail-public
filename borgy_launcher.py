@@ -65,7 +65,7 @@ if __name__ == "__main__":
         #"-e", "DATA_PATH=/mnt/AIDATA/datasets",
         "-v", "/mnt/AIDATA:/mnt/AIDATA", # make this directory visible inside the docker
         "--req-cores=6",
-        "--req-gpus=2",
+        "--req-gpus=1",
         "--req-ram-gbytes=12"]
 
     print ((" ").join(borgy_args))

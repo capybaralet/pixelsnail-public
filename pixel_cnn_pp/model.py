@@ -11,6 +11,9 @@ import numpy as np
 
 # TODO: understand the gradient flow a bit better, and the thing about the Jacobian of AR being 0s except above the diagonal
 
+def log_sigmoid_from_logits(logits):
+    return -tf.nn.softplus(-logits)
+
 def IAF(x, AR_x):
     """ 
     modified from Alex
@@ -19,11 +22,11 @@ def IAF(x, AR_x):
     AR_x: output of, e.g. MADE (B, N, n_flow_params)
         for IAF, n_flow_params = 2; the params are (mu, pre_sigma)
     """
-    tf.reshape(AR_x, x.shape + [-1]) # get mu and sigma in the last axis
     mu, pre_sigma = tf.unstack(AR_x, axis=2)
     mu.shape.assert_is_compatible_with(x.shape)
     pre_sigma += 3.  # favors transparency of the layers.
     sigma = tf.sigmoid(pre_sigma)
+    # N.B.: this is non-standard!
     x = sigma * x + (1 - sigma) * mu
     log_sigma = log_sigmoid_from_logits(pre_sigma)  # this is numerically more stable than tf.log(sigma)
     log_det = tf.reduce_sum(log_sigma, axis=1)
@@ -45,10 +48,10 @@ def DSF1(x, AR_x):
     # extract flow params
     AR_x = tf.reshape(AR_x, x_shp + [-1, 3])
     pre_a, b, w_logits = tf.unstack(AR_x, axis=3)
-    # TODO: what's all this then?
-    b *= 5.
-    w_logits *= 5.
-    pre_a *= 5.
+    #b *= 5.
+    #w_logits *= 5.
+    #pre_a *= 5.
+    pre_a += np.log(np.exp(1) - 1) # sets a ~= 1
 
     a = tf.nn.softplus(pre_a)
     w = tf.nn.softmax(w_logits, dim=2)
@@ -61,12 +64,10 @@ def DSF1(x, AR_x):
     x = tf.log(pre_x / (1 - pre_x))  # - tf.log(1. - pre_x)
 
     # Calculate log_det
-    def log_sigmoid_from_logits(logits):
-        return -tf.nn.softplus(-logits)
     log_j = tf.nn.log_softmax(w_logits, dim=2) + log_sigmoid_from_logits(pre_sigmoid) + log_sigmoid_from_logits(-pre_sigmoid) + tf.log(a)
     log_j = tf.reduce_logsumexp(log_j, axis=2)
     log_j.shape.assert_is_compatible_with(pre_x.shape)
-    log_det = log_j - x + np.log(1. - epsilon)
+    log_det = log_j - (tf.log(pre_x) + tf.log(1 - pre_x)) + np.log(1. - epsilon)
 
     return x, tf.reduce_sum(log_det, axis=1)
 
@@ -92,18 +93,19 @@ def pixelSNAIL_MAF(x,
         with tf.variable_scope(scope, "pixelSNAIL_" + flow + '_flow' + str(n_flow), [x]):
             AR_x = _dk_base_noup_smallkey_spec(x, h=h, init=init, ema=ema, dropout_p=dropout_p,
                             nr_resnet=nr_resnet, nr_filters=nr_filters, attn_rep=attn_rep, att_downsample=att_downsample, resnet_nonlinearity=resnet_nonlinearity, 
-                            n_out=3*n_flow_params) # we need to produce parameters for 3 pixels at once!
+                            n_out=3*n_flow_params) # we need to produce parameters for 3 pixels at once! TODO: is this the bug?
 
             x_shp = x.shape.as_list()
             print ("x_shp", x_shp)
             #print (x_shp)
 
-            # flatten x, AR_x
+            # flatten x and AR_x
             x = tf.reshape(x, (x_shp[0], -1))
             print (x.shape.as_list())
             AR_x = tf.reshape(AR_x, (x_shp[0], -1))
             print (AR_x.shape.as_list())
-            # reshape AR_x as (B, N, n_params)
+
+            # reshape AR_x as (B, N, n_flow_params)
             AR_x = tf.reshape(AR_x, x.shape.as_list() + [-1,])
             print (AR_x.shape.as_list())
 
@@ -115,7 +117,7 @@ def pixelSNAIL_MAF(x,
             # undo the flattening
             x = tf.reshape(x, x_shp)
 
-            log_dets = log_dets + log_det
+            log_dets += log_det
 
     return x, log_dets
 

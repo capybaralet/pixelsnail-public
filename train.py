@@ -153,7 +153,7 @@ def main(args):
     ema = tf.train.ExponentialMovingAverage(decay=args.polyak_decay)
     maintain_averages_op = tf.group(ema.apply(all_params))
 
-    # TODO: loss: sum vs. mean; reduce_sum log_dets, +/-log_dets
+    # TODO: double check +/-log_dets (seems like - is correct)
     loss_gen, loss_gen_test, grads = [], [], []
     for i in range(args.nr_gpu):
         with tf.device('/gpu:%d' % i):
@@ -187,7 +187,7 @@ def main(args):
     # add losses and gradients together and get training updates
     tf_lr = tf.placeholder(tf.float32, shape=[])
     with tf.device('/gpu:0'):
-        for i in range(1, args.nr_gpu):
+        for i in range(1, args.nr_gpu): # add all the losses and gradients from GPUs1+ to those from GPU0
             loss_gen[0] += loss_gen[i]
             loss_gen_test[0] += loss_gen_test[i]
             for j in range(len(grads[0])):
@@ -218,7 +218,10 @@ def main(args):
     # convert loss to bits/dim
     total_gpus = sum(comm.allgather(args.nr_gpu))
     lprint('using %d gpus across %d machines' % (total_gpus, num_tasks))
-    norm_const = np.log(2.) * np.prod(obs_shape) * args.batch_size
+    if args.model == 'dk_CNN':
+        norm_const = np.log(2.) * np.prod(obs_shape) * args.batch_size
+    else:
+        norm_const = np.log(2.)
     norm_const *= total_gpus / num_tasks
     bits_per_dim = loss_gen[0] / norm_const
     bits_per_dim_test = loss_gen_test[0] / norm_const
@@ -380,12 +383,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # DK (TODO: restore defaults!)
-    parser.add_argument('--n_ex', type=int, default=48)
-    parser.add_argument('--n_flows', type=int, default=2)
-    parser.add_argument('--n_flow_params', type=int, default=24)
+    parser.add_argument('--n_ex', type=int, default=16)
+    parser.add_argument('--n_flows', type=int, default=1)
+    parser.add_argument('--n_flow_params', type=int, default=2)
     parser.add_argument('--use_valid', type=int, default=1)
     # DK (modified)
-    parser.add_argument('--model', type=str, default="dk_DSF1", # alias for "h12_noup_smallkey"
+    parser.add_argument('--model', type=str, default="dk_IAF",
             choices=["dk_CNN", "dk_IAF", "dk_DSF1"], 
                                             help='name of the model')
 
@@ -396,7 +399,7 @@ if __name__ == '__main__':
                                             help='Location for parameter checkpoints and samples')
     parser.add_argument('-d', '--data_set', type=str, default='cifar',
                                             help='Can be either cifar|imagenet')
-    parser.add_argument('-t', '--save_interval', type=int, default=10,
+    parser.add_argument('-t', '--save_interval', type=int, default=100, #  # TODO: restore
                                             help='Every how many epochs to write checkpoint/samples?')
     parser.add_argument('-r', '--load_params', type=str,
                                             help='Restore training from previous model checkpoint?')
