@@ -52,6 +52,7 @@ def masked_dense_layer(x, mask, weight_initializer=None, bias_initializer=tf.con
         b = tf.get_variable('b', mask.shape[1], tf.float32, initializer=bias_initializer)
         return tf.matmul(x, w * mask) + b
 
+# TODO: check for bugs!
 def made(x, context, hidden_layer_sizes, repeat_last_layer, activation_fn, scope=None):
 
     with tf.variable_scope(scope, "made"):
@@ -73,10 +74,4 @@ def made(x, context, hidden_layer_sizes, repeat_last_layer, activation_fn, scope
 
         h = tf.reshape(h, (-1, n_inputs, repeat_last_layer))
         return h
-
-# maintaining pixelSNAIL API
-def dk_made(x, h, init, ema, dropout_p,
-            nr_resnet, nr_filters, attn_rep, att_downsample, resnet_nonlinearity, 
-            n_out):
-    return made(x, None, [nr_filters,] * nr_resnet, n_out, resnet_nonlinearity)
 

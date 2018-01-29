@@ -33,11 +33,9 @@ def IAF(x, AR_x):
     mu.shape.assert_is_compatible_with(x.shape)
     pre_sigma += 3.  # favors transparency of the layers.
     sigma = tf.sigmoid(pre_sigma)
-    # N.B.: this is non-standard!
     x = sigma * x + (1 - sigma) * mu
     log_sigma = log_sigmoid_from_logits(pre_sigma)  # this is numerically more stable than tf.log(sigma)
-    log_det = tf.reduce_sum(log_sigma, axis=1)
-    return x, log_det
+    return x, log_sigma
 
 def DSF1(x, AR_x):
     """ 
@@ -48,8 +46,6 @@ def DSF1(x, AR_x):
         for DSF1.0, n_flow_params = 3 * n_sigmoid_units
     """
     epsilon = 1e-6
-
-    # z_dim == N
     x_shp = x.shape.as_list()
 
     # extract flow params
@@ -74,9 +70,10 @@ def DSF1(x, AR_x):
     log_j = tf.nn.log_softmax(w_logits, dim=2) + log_sigmoid_from_logits(pre_sigmoid) + log_sigmoid_from_logits(-pre_sigmoid) + tf.log(a)
     log_j = tf.reduce_logsumexp(log_j, axis=2)
     log_j.shape.assert_is_compatible_with(pre_x.shape)
+    #log_det = tf.reduce_sum(log_j - (tf.log(pre_x) + tf.log(1 - pre_x)) + np.log(1. - epsilon), axis=1)
     log_det = log_j - (tf.log(pre_x) + tf.log(1 - pre_x)) + np.log(1. - epsilon)
 
-    return x, tf.reduce_sum(log_det, axis=1)
+    return x, log_det
 
 
 # TODO
@@ -84,19 +81,14 @@ def DSF1(x, AR_x):
 #   nr_filters -- hidden_layer_size
 #   nr_resnet -- len(hidden_layer_sizes)
 #   etc...
-def generic_flow(x,
-        h=None, init=False, ema=None, dropout_p=0.5, # these are modified for different copies of the template
-        nr_resnet=4, nr_filters=256, attn_rep=12, att_downsample=1, resnet_nonlinearity='elu', # these settings stay fixed (kwargs ugliness...)
-        n_flow_params=48, # new argument, replacing nr_logistic_mix
-        #
-        flow='DSF1',
-        AR='pixelSNAIL',
-        n_flows=2, # new argument
-        #scope=None, # from Alex's code
+def generic_flow(x, h=None, 
+        init=False, ema=None, dropout_p=0.5, # these are modified for different copies of the template
+        nr_resnet=4, nr_filters=256, attn_rep=12, att_downsample=1, resnet_nonlinearity='elu', # these settings are specified by model_opt (kwargs ugliness...)
+        n_flow_params=48, # new argument, replacing nr_logistic_mix, set by model_opt
+        n_flows=2, # new argument, set by model_opt
+        flow='DSF1', # new argument, set by functools.partial
+        AR='pixelSNAIL', # new argument, set by functools.partial
         ):
-
-    scope = None # TODO: make sure this is OK
-    log_dets = tf.constant(0.)
 
     if flow == 'IAF':
         assert n_flow_params == 2
@@ -105,16 +97,18 @@ def generic_flow(x,
         assert n_flow_params % 3 == 0
         flow_ = DSF1
 
+    log_dets = tf.constant(0.)
+    x_shp = x.shape.as_list()
     for n_flow in range(n_flows):
-        with tf.variable_scope(scope, flow + '_n_flow' + str(n_flow), [x]):
-            x_shp = x.shape.as_list()
+        with tf.variable_scope(None, flow + '_n_flow' + str(n_flow), [x]):
             if AR == 'MADE': 
-                x = tf.reshape(x, (x_shp[0], -1)) # flatten x before applying MADE
+                x = tf.reshape(x, (x_shp[0], -1)) # flatten examples before applying MADE
+                # MADE reshape?
                 AR_x = made(x, None, [nr_filters,] * nr_resnet, n_flow_params, lookup_activation_fn(resnet_nonlinearity))
             elif AR == 'pixelSNAIL': 
                 AR_x = _dk_base_noup_smallkey_spec(x, h=h, init=init, ema=ema, dropout_p=dropout_p,
                                 nr_resnet=nr_resnet, nr_filters=nr_filters, attn_rep=attn_rep, att_downsample=att_downsample, resnet_nonlinearity=resnet_nonlinearity, 
-                                n_out=3*n_flow_params) # we need to produce parameters for 3 pixels at once! TODO: is this the bug?
+                                n_out=3*n_flow_params) # we need to produce parameters for 3 pixels at once
                 # flatten x and AR_x after applying pixelSNAIL
                 x = tf.reshape(x, (x_shp[0], -1))
                 AR_x = tf.reshape(AR_x, (x_shp[0], -1))
@@ -123,6 +117,9 @@ def generic_flow(x,
 
             x, log_det = flow_(x, AR_x)
             log_dets += log_det
+
+            # restore shape of x
+            x = tf.reshape(x, x_shp)
 
     return x, log_dets
 

@@ -10,6 +10,10 @@ TODO:
 
 """
 
+import numpy as np
+def spherical_Gaussian_NLL(x):
+    return .5 * (x**2 + np.log(2*np.pi))
+
 
 def main(args):
     import os
@@ -42,6 +46,7 @@ def main(args):
             print(*a, **kw)
             print(*a, **kw, file=f_log)
 
+    #lprint (num_tasks)
     lprint('input args:\n', json.dumps(vars(args), indent=4,
                                                                          separators=(',', ':')))    # pretty print args
     # -----------------------------------------------------------------------------
@@ -156,6 +161,9 @@ def main(args):
 
     # TODO: double check +/-log_dets (seems like - is correct)
     loss_gen, loss_gen_test, grads = [], [], []
+    # TODO: remove these two lines (etc.)
+    loss_prior, loss_j = [], []
+    loss_prior_test, loss_j_test = [], []
     for i in range(args.nr_gpu):
         with tf.device('/gpu:%d' % i):
 
@@ -168,9 +176,12 @@ def main(args):
                 else:
                     loss_gen.append(nn.discretized_mix_logistic_loss(x, gen_par))
             else:
+                # TODO: does that work as expected? (I sure think it should... it's just python, after all!)
                 u, log_dets = gen_par
                 #loss_gen.append(tf.reduce_sum(tf.reduce_mean(u**2, axis=0)) - tf.reduce_mean(log_dets))
-                loss_gen.append(tf.reduce_sum(u**2) - tf.reduce_sum(log_dets))
+                loss_gen.append(tf.reduce_sum(spherical_Gaussian_NLL(u)) - tf.reduce_sum(log_dets))
+                loss_prior.append(tf.reduce_sum(spherical_Gaussian_NLL(u)))
+                loss_j.append(-tf.reduce_sum(log_dets))
                 lprint (u.shape.as_list(), log_dets.shape.as_list())
             #import pdb; pdb.set_trace()
             grads.append(tf.gradients(loss_gen[i], all_params))
@@ -186,7 +197,13 @@ def main(args):
             else:
                 u, log_dets = gen_par
                 #loss_gen_test.append(tf.reduce_sum(tf.reduce_mean(u**2, axis=0)) - tf.reduce_mean(log_dets))
-                loss_gen_test.append(tf.reduce_sum(u**2) - tf.reduce_sum(log_dets))
+                loss_gen_test.append(tf.reduce_sum(spherical_Gaussian_NLL(u)) - tf.reduce_sum(log_dets))
+                loss_prior_test.append(tf.reduce_sum(spherical_Gaussian_NLL(u)))
+                loss_j_test.append(-tf.reduce_sum(log_dets))
+        lprint ("\n\nline 202")
+        lprint (args.model)
+        lprint (loss_gen[0].shape.as_list())
+        lprint ("\n\n")
 
 
     # add losses and gradients together and get training updates
@@ -236,7 +253,7 @@ def main(args):
     bits_per_dim = tf.check_numerics(bits_per_dim, 'train loss is nan')
     bits_per_dim_test = tf.check_numerics(bits_per_dim_test, 'test loss is nan')
 
-    # TODO: sampling stuff
+    # TODO: MAF sampling
     if args.model == 'dk_CNN':
         new_x_gen = []
         for i in range(args.nr_gpu):
@@ -293,7 +310,9 @@ def main(args):
                 y = np.split(y, args.nr_gpu)
                 feed_dict.update({ys[i]: y[i] for i in range(args.nr_gpu)})
         return feed_dict
-
+    
+    for var in tf.global_variables():
+        lprint(var)
 
     # //////////// perform training //////////////
     lprint('dataset size: %d' % len(train_data.data))
@@ -378,6 +397,12 @@ def main(args):
             np.savetxt(os.path.join(save_dir, args.model + '_test_bpd.txt'), test_bpd, fmt='%1.3f')
             np.savetxt(os.path.join(save_dir, args.model + '_train_bpd.txt'), train_bpd, fmt='%1.3f')
             np.savetxt(os.path.join(save_dir, args.model + '_times.txt'), times, fmt='%1.0f')
+
+        lprint("loss components")
+        lprint(sess.run(loss_prior))
+        lprint(sess.run(loss_j))
+        lprint(sess.run(loss_prior_test))
+        lprint(sess.run(loss_j_test))
 
         # TODO: sampling from MAF
         if args.model=="dk_CNN":
