@@ -440,8 +440,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # DK (TODO: restore defaults!)
-    parser.add_argument('--n_ex', type=int, default=90)
-    parser.add_argument('--n_flows', type=int, default=1)
+    parser.add_argument('--n_ex', type=int, default=8*3)
+    parser.add_argument('--n_flows', type=int, default=2)
     parser.add_argument('--n_flow_params', type=int, default=2)
     parser.add_argument('--use_valid', type=int, default=1)
     # DK (modified)
@@ -464,9 +464,9 @@ if __name__ == '__main__':
     # model
     #parser.add_argument('--model', type=str, default="dk_CNN", # alias for "h12_noup_smallkey"
     #                                        help='name of the model')
-    parser.add_argument('-q', '--nr_resnet', type=int, default=1,
+    parser.add_argument('-q', '--nr_resnet', type=int, default=4,
                                             help='Number of residual blocks per stage of the model')
-    parser.add_argument('-n', '--nr_filters', type=int, default=32,
+    parser.add_argument('-n', '--nr_filters', type=int, default=256,
                                             help='Number of filters to use across the model. Higher = larger model.')
     parser.add_argument('-m', '--nr_logistic_mix', type=int, default=10,
                                             help='Number of logistic components in the mixture. Higher = more flexible model')
@@ -479,9 +479,9 @@ if __name__ == '__main__':
                                             default=1e-3, help='Base learning rate')
     parser.add_argument('-e', '--lr_decay', type=float, default=0.999998,
                                             help='Learning rate decay, applied every step of the optimization')
-    parser.add_argument('-b', '--batch_size', type=int, default=6, # TODO: restore
+    parser.add_argument('-b', '--batch_size', type=int, default=3, # TODO: restore
                                             help='Batch size during training per GPU')
-    parser.add_argument('-a', '--init_batch_size', type=int, default=6, # TODO: restore
+    parser.add_argument('-a', '--init_batch_size', type=int, default=3, # TODO: restore
                                             help='How much data to use for data-dependent initialization.')
     parser.add_argument('-p', '--dropout_p', type=float, default=0.5,
                                             help='Dropout strength (i.e. 1 - keep_prob). 0 = No dropout, higher = more dropout.')
