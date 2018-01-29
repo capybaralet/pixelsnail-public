@@ -15,6 +15,8 @@ def spherical_Gaussian_NLL(x):
     return .5 * (x**2 + np.log(2*np.pi))
 
 
+
+
 def main(args):
     import os
     import sys
@@ -32,6 +34,9 @@ def main(args):
     import data.imagenet_data as imagenet_data
 
     import tf_utils as tfu
+
+    # TODO: from data.cifar10_data import ALPHA
+    ALPHA = .05
 
     comm = MPI.COMM_WORLD
     num_tasks, task_id = comm.Get_size(), comm.Get_rank()
@@ -53,6 +58,12 @@ def main(args):
     # fix random seed for reproducibility
     rng = np.random.RandomState(args.seed + task_id)
     tf.set_random_seed(args.seed + task_id)
+    
+    # for MAF, we model pixels as real values, and must dequantize the discrete pixel values!
+    if args.model == 'dk_CNN':
+        dequantize = False
+    else:
+        dequantize = True
 
     # initialize data loaders for train/test splits
     if args.data_set == 'imagenet' and args.class_conditional:
@@ -62,22 +73,27 @@ def main(args):
     if args.use_valid:
         train_data = DataLoader(args.data_dir, 'train_', args.batch_size,
                                                         rng=rng, shuffle=True, return_labels=args.class_conditional,
+                                                        dequantize=dequantize,
                                                         n_ex=args.n_ex)
         test_data = DataLoader(args.data_dir, 'valid_', args.batch_size,
                                                      shuffle=False, return_labels=args.class_conditional,
+                                                     dequantize=dequantize,
                                                      #n_ex=int(.25 * args.n_ex))
                                                      n_ex=args.n_ex)
     else:
         train_data = DataLoader(args.data_dir, 'train', args.batch_size,
                                                         rng=rng, shuffle=True, return_labels=args.class_conditional,
+                                                        dequantize=dequantize,
                                                         n_ex=args.n_ex)
         test_data = DataLoader(args.data_dir, 'test', args.batch_size,
                                                      shuffle=False, return_labels=args.class_conditional,
+                                                     dequantize=dequantize,
                                                      n_ex=args.n_ex)
     obs_shape = train_data.get_observation_size()    # e.g. a tuple (32,32,3)
     assert len(obs_shape) == 3, 'assumed right now'
 
     if args.nr_gpu is None:
+        #assert False
         from tensorflow.python.client import device_lib
         args.nr_gpu = len([d for d in device_lib.list_local_devices()
                                              if d.device_type == 'GPU'])
@@ -93,8 +109,12 @@ def main(args):
             x = train_data.__next__(args.batch_size)
         else:
             x = test_data.__next__(args.batch_size)
-        x = np.cast[np.float32]((x - 127.5) / 127.5)
+        #x = np.cast[np.float32]((x - 127.5) / 127.5)
         return dict(x=x)
+
+    #trx = _get_batch(1)
+    #tex = _get_batch(0)
+    #import pdb; pdb.set_trace()
 
     batch_def = dict(x=tfu.vdef(args.batch_size, obs_shape))
     qr = tfu.Struct(
@@ -107,6 +127,7 @@ def main(args):
     tf.add_to_collection(tf.GraphKeys.QUEUE_RUNNERS, qr.test)
 
     if args.nr_gpu is None:
+        assert False
         from tensorflow.python.client import device_lib
         args.nr_gpu = len([d for d in device_lib.list_local_devices()
                                              if d.device_type == 'GPU'])
@@ -159,8 +180,8 @@ def main(args):
     ema = tf.train.ExponentialMovingAverage(decay=args.polyak_decay)
     maintain_averages_op = tf.group(ema.apply(all_params))
 
-    # TODO: double check +/-log_dets (seems like - is correct)
     loss_gen, loss_gen_test, grads = [], [], []
+    extra_bpd_term, extra_bpd_term_test = [], [] 
     # TODO: remove these two lines (etc.)
     loss_prior, loss_j = [], []
     loss_prior_test, loss_j_test = [], []
@@ -168,6 +189,7 @@ def main(args):
         with tf.device('/gpu:%d' % i):
 
             x = qr.train.batch().x
+            #tr_x = x
             gen_par = model(x, hs[i], ema=None,
                                             dropout_p=args.dropout_p, **model_opt)
             if args.model == 'dk_CNN':
@@ -176,17 +198,18 @@ def main(args):
                 else:
                     loss_gen.append(nn.discretized_mix_logistic_loss(x, gen_par))
             else:
-                # TODO: does that work as expected? (I sure think it should... it's just python, after all!)
                 u, log_dets = gen_par
-                #loss_gen.append(tf.reduce_sum(tf.reduce_mean(u**2, axis=0)) - tf.reduce_mean(log_dets))
                 loss_gen.append(tf.reduce_sum(spherical_Gaussian_NLL(u)) - tf.reduce_sum(log_dets))
                 loss_prior.append(tf.reduce_sum(spherical_Gaussian_NLL(u)))
                 loss_j.append(-tf.reduce_sum(log_dets))
                 lprint (u.shape.as_list(), log_dets.shape.as_list())
+                # eqn 27 MAF
+                extra_bpd_term.append(-np.log2(1 - 2*ALPHA) + 8 + (tf.reduce_mean(tf.nn.softplus(x)) + tf.reduce_mean(tf.nn.softplus(1-x))) / np.log(2.))
             #import pdb; pdb.set_trace()
             grads.append(tf.gradients(loss_gen[i], all_params))
 
             x = qr.test.batch().x
+            #te_x = x
             gen_par = model(x, hs[i], ema=ema, dropout_p=0., **model_opt)
             if args.model == 'dk_CNN':
                 if isinstance(gen_par, tuple) and len(gen_par) == 3:
@@ -196,14 +219,11 @@ def main(args):
                     loss_gen_test.append(nn.discretized_mix_logistic_loss(x, gen_par))
             else:
                 u, log_dets = gen_par
-                #loss_gen_test.append(tf.reduce_sum(tf.reduce_mean(u**2, axis=0)) - tf.reduce_mean(log_dets))
                 loss_gen_test.append(tf.reduce_sum(spherical_Gaussian_NLL(u)) - tf.reduce_sum(log_dets))
                 loss_prior_test.append(tf.reduce_sum(spherical_Gaussian_NLL(u)))
                 loss_j_test.append(-tf.reduce_sum(log_dets))
-        lprint ("\n\nline 202")
-        lprint (args.model)
-        lprint (loss_gen[0].shape.as_list())
-        lprint ("\n\n")
+                # eqn 27 MAF
+                extra_bpd_term_test.append(-np.log2(1 - 2*ALPHA) + 8 + (tf.reduce_mean(tf.nn.softplus(x)) + tf.reduce_mean(tf.nn.softplus(1-x))) / np.log(2.))
 
 
     # add losses and gradients together and get training updates
@@ -216,6 +236,7 @@ def main(args):
                 grads[0][j] += grads[i][j]
 
     if num_tasks > 1:
+        assert False
         lprint('creating mpi optimizer')
         # If we have multiple mpi processes, average across them.
         flat_grad = tf.concat([tf.reshape(g, (-1,)) for g in grads[0]], axis=0)
@@ -240,15 +261,14 @@ def main(args):
     # convert loss to bits/dim
     total_gpus = sum(comm.allgather(args.nr_gpu))
     lprint('using %d gpus across %d machines' % (total_gpus, num_tasks))
-    # TODO: bpd vs. bpp?
-    if args.model == 'dk_CNN':
-        norm_const = np.log(2.) * np.prod(obs_shape) * args.batch_size
-    else:
-        #norm_const = np.log(2.) * np.prod(obs_shape)
-        norm_const = np.log(2.) * np.prod(obs_shape) * args.batch_size
+    norm_const = np.log(2.) * np.prod(obs_shape) * args.batch_size
     norm_const *= total_gpus / num_tasks
     bits_per_dim = loss_gen[0] / norm_const
     bits_per_dim_test = loss_gen_test[0] / norm_const
+    #TODO: extra terms of eqn 27 (MAF)
+    if model != 'dk_CNN':
+        bits_per_dim += extra_bpd_term
+        bits_per_dim_test += extra_bpd_term_test
 
     bits_per_dim = tf.check_numerics(bits_per_dim, 'train loss is nan')
     bits_per_dim_test = tf.check_numerics(bits_per_dim_test, 'test loss is nan')
@@ -290,7 +310,7 @@ def main(args):
     saver = tf.train.Saver(max_to_keep=2)
 
     # turn numpy inputs into feed_dict for use with tensorflow
-    # DK - this is only used for initialization! 
+    # DK - this is only used for initialization! (I think)
     def make_feed_dict(data, init=False):
         if type(data) is tuple:
             x, y = data
@@ -298,7 +318,7 @@ def main(args):
             x = data
             y = None
         # input to pixelCNN is scaled from uint8 [0,255] to float in range [-1,1]
-        x = np.cast[np.float32]((x - 127.5) / 127.5)
+        #x = np.cast[np.float32]((x - 127.5) / 127.5)
         if init:
             feed_dict = {x_init: x}
             if y is not None:
@@ -311,12 +331,12 @@ def main(args):
                 feed_dict.update({ys[i]: y[i] for i in range(args.nr_gpu)})
         return feed_dict
     
-    for var in tf.global_variables():
-        lprint(var)
+    if 0:
+        for var in tf.global_variables():
+            lprint(var)
 
     # //////////// perform training //////////////
     lprint('dataset size: %d' % len(train_data.data))
-    # TODO: validation set
     train_bpd = []
     test_bpd = []
     times = []
@@ -329,6 +349,7 @@ def main(args):
 
     sess.run(initializer, feed_dict)
     if args.load_params:
+        assert False
         # ckpt_file = save_dir + '/params_' + args.data_set + '.ckpt'
         ckpt_file = args.load_params
         lprint('restoring parameters from', ckpt_file)
@@ -419,8 +440,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # DK (TODO: restore defaults!)
-    parser.add_argument('--n_ex', type=int, default=900)
-    parser.add_argument('--n_flows', type=int, default=2)
+    parser.add_argument('--n_ex', type=int, default=90)
+    parser.add_argument('--n_flows', type=int, default=1)
     parser.add_argument('--n_flow_params', type=int, default=2)
     parser.add_argument('--use_valid', type=int, default=1)
     # DK (modified)
@@ -443,9 +464,9 @@ if __name__ == '__main__':
     # model
     #parser.add_argument('--model', type=str, default="dk_CNN", # alias for "h12_noup_smallkey"
     #                                        help='name of the model')
-    parser.add_argument('-q', '--nr_resnet', type=int, default=2,
+    parser.add_argument('-q', '--nr_resnet', type=int, default=1,
                                             help='Number of residual blocks per stage of the model')
-    parser.add_argument('-n', '--nr_filters', type=int, default=256,
+    parser.add_argument('-n', '--nr_filters', type=int, default=32,
                                             help='Number of filters to use across the model. Higher = larger model.')
     parser.add_argument('-m', '--nr_logistic_mix', type=int, default=10,
                                             help='Number of logistic components in the mixture. Higher = more flexible model')

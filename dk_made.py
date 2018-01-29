@@ -68,7 +68,7 @@ def made(x, context, hidden_layer_sizes, repeat_last_layer, activation_fn, scope
         for i, mask in enumerate(masks):
             h = masked_dense_layer(h, mask, scope="made%d" % i)
             if i < len(masks) - 1:
-                if context is not None:
+                if context is not None: # TODO: why no context for the final layer?
                     h += tf.contrib.layers.linear(context, h.shape.as_list()[1], scope="context%d" % i)
                 h = activation_fn(h)
 

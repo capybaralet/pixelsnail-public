@@ -9,6 +9,12 @@ import tarfile
 from six.moves import urllib
 import numpy as np
 
+ALPHA = .05
+
+def logit(x):
+    return np.log(x / (1-x))
+
+
 def maybe_download_and_extract(data_dir, url='http://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz'):
     if not os.path.exists(os.path.join(data_dir, 'cifar-10-batches-py')):
         if not os.path.exists(data_dir):
@@ -68,6 +74,8 @@ class DataLoader(object):
 
     #def __init__(self, data_dir, subset, batch_size, rng=None, shuffle=False, return_labels=False):
     def __init__(self, data_dir='./', subset='train', batch_size=8, rng=None, shuffle=False, return_labels=False,
+            dequantize=False,
+            rescale=True,
             n_ex=None):
         """ 
         - data_dir is location where to store files
@@ -75,6 +83,9 @@ class DataLoader(object):
         - batch_size is int, of #examples to load at once
         - rng is np.random.RandomState object for reproducibility
         """
+
+        self.dequantize = dequantize
+        self.rescale = dequantize
 
         self.data_dir = data_dir
         self.batch_size = batch_size
@@ -92,6 +103,10 @@ class DataLoader(object):
             self.data = self.data[:n_ex]
             self.labels = self.labels[:n_ex]
         self.data = np.transpose(self.data, (0,2,3,1)) # (N,3,32,32) -> (N,32,32,3)
+        self.data = np.cast[np.float32](self.data)
+        if rescale and not dequantize:
+            self.data = np.cast[np.float32]((self.data - 127.5) / 127.5)
+        self.orig_data = self.data
 
         
         self.p = 0 # pointer to where we are in iteration
@@ -113,11 +128,17 @@ class DataLoader(object):
         """ n is the number of examples to fetch """
         if n is None: n = self.batch_size
 
-        # on first iteration lazily permute all data
+        # on first iteration lazily permute all data and dequantize
         if self.p == 0 and self.shuffle:
             inds = self.rng.permutation(self.data.shape[0])
-            self.data = self.data[inds]
+            self.data = self.orig_data[inds]
             self.labels = self.labels[inds]
+
+        if self.p == 0 and self.dequantize:
+            self.data = self.orig_data + np.random.uniform(size=self.data.shape)
+            if self.rescale:
+                self.data *= 1./256
+            self.data = logit(ALPHA + (1 - 2 * ALPHA) * self.data)
         """
         # on last iteration reset the counter and raise StopIteration
         if self.p + n > self.data.shape[0]:
