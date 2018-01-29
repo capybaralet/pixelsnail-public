@@ -440,7 +440,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # DK (TODO: restore defaults!)
-    parser.add_argument('--n_ex', type=int, default=8*3)
+    parser.add_argument('--n_ex', type=int, default=45000)
     parser.add_argument('--n_flows', type=int, default=2)
     parser.add_argument('--n_flow_params', type=int, default=2)
     parser.add_argument('--use_valid', type=int, default=1)
