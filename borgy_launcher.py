@@ -45,7 +45,7 @@ if __name__ == "__main__":
         #
         save_interval=1,
         n_ex=100,
-        data_dir="/mnt/AIDATA/home/david.krueger/data/",
+        data_dir="/mnt/AIDATA/home/" + username + "/data/",
     )
 
     parser = argparse.ArgumentParser()
