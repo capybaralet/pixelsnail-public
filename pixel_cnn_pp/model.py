@@ -31,10 +31,13 @@ def IAF(x, AR_x):
     """
     mu, pre_sigma = tf.unstack(AR_x, axis=2)
     mu.shape.assert_is_compatible_with(x.shape)
-    pre_sigma += 3.  # favors transparency of the layers.
-    sigma = tf.sigmoid(pre_sigma)
-    x = sigma * x + (1 - sigma) * mu
-    log_sigma = log_sigmoid_from_logits(pre_sigma)  # this is numerically more stable than tf.log(sigma)
+    #pre_sigma += 3.  # favors transparency of the layers.
+    pre_sigma += 1.  # favors transparency of the layers.
+    #sigma = tf.sigmoid(pre_sigma)
+    sigma = tf.nn.softplus(pre_sigma)
+    x = sigma * x + mu
+    #log_sigma = log_sigmoid_from_logits(pre_sigma)  # this is numerically more stable than tf.log(sigma)
+    log_sigma = tf.log(sigma)  # this is numerically more stable than tf.log(sigma)
     return x, log_sigma
 
 def DSF1(x, AR_x):
@@ -50,6 +53,7 @@ def DSF1(x, AR_x):
 
     # extract flow params
     AR_x = tf.reshape(AR_x, x_shp + [-1, 3])
+    AR_x *= 1.
     pre_a, b, w_logits = tf.unstack(AR_x, axis=3)
     #b *= 5.
     #w_logits *= 5.

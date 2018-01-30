@@ -104,8 +104,10 @@ class DataLoader(object):
             self.labels = self.labels[:n_ex]
         self.data = np.transpose(self.data, (0,2,3,1)) # (N,3,32,32) -> (N,32,32,3)
         self.data = np.cast[np.float32](self.data)
-        if rescale and not dequantize:
-            self.data = np.cast[np.float32]((self.data - 127.5) / 127.5)
+        if rescale:
+            if not dequantize: # else, we rescale in __next__
+                self.data = np.cast[np.float32]((self.data - 127.5) / 127.5)
+
         self.orig_data = self.data
 
         
@@ -128,17 +130,19 @@ class DataLoader(object):
         """ n is the number of examples to fetch """
         if n is None: n = self.batch_size
 
-        # on first iteration lazily permute all data and dequantize
-        if self.p == 0 and self.shuffle:
-            inds = self.rng.permutation(self.data.shape[0])
-            self.data = self.orig_data[inds]
-            self.labels = self.labels[inds]
-
+        # on first iteration, add fresh dequantization noise
         if self.p == 0 and self.dequantize:
             self.data = self.orig_data + np.random.uniform(size=self.data.shape)
             if self.rescale:
                 self.data *= 1./256
             self.data = logit(ALPHA + (1 - 2 * ALPHA) * self.data)
+
+        # on first iteration lazily permute all data and dequantize
+        if self.p == 0 and self.shuffle:
+            inds = self.rng.permutation(self.data.shape[0])
+            self.data = self.data[inds]
+            self.labels = self.labels[inds]
+
         """
         # on last iteration reset the counter and raise StopIteration
         if self.p + n > self.data.shape[0]:

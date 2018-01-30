@@ -158,13 +158,15 @@ def main(args):
     # TODO: don't use kwargs!?!?
     if args.model == "dk_CNN":
         model_opt = {'nr_resnet': args.nr_resnet, 'nr_filters': args.nr_filters,
-                                 'nr_logistic_mix': args.nr_logistic_mix, 'resnet_nonlinearity': args.resnet_nonlinearity}
+                                 'nr_logistic_mix': args.nr_logistic_mix, 'resnet_nonlinearity': args.resnet_nonlinearity,
+                                 'attn_rep': args.attn_rep}
     else:
         assert args.n_flow_params is not None
         assert args.n_flows is not None
         model_opt = {'nr_resnet': args.nr_resnet, 'nr_filters': args.nr_filters,
                                  'n_flow_params': args.n_flow_params, 'resnet_nonlinearity': args.resnet_nonlinearity,
-                                 'n_flows': args.n_flows}
+                                 'n_flows': args.n_flows,
+                                 'attn_rep': args.attn_rep}
     model = tf.make_template('model', getattr(pxpp_models, args.model + "_spec"))
 
     # TODO: init
@@ -203,8 +205,8 @@ def main(args):
                 loss_prior.append(tf.reduce_sum(spherical_Gaussian_NLL(u)))
                 loss_j.append(-tf.reduce_sum(log_dets))
                 lprint (u.shape.as_list(), log_dets.shape.as_list())
-                # eqn 27 MAF
-                extra_bpd_term.append(-np.log2(1 - 2*ALPHA) + 8 + (tf.reduce_mean(tf.nn.softplus(x)) + tf.reduce_mean(tf.nn.softplus(1-x))) / np.log(2.))
+                # eqn 27 MAF (does not depend on model parameters!!)
+                extra_bpd_term.append(-np.log2(1 - 2*ALPHA) + 8 + (tf.reduce_mean(tf.log(tf.nn.sigmoid(x))) + tf.reduce_mean(tf.log(1 - tf.nn.sigmoid(x)))) / np.log(2.))
             #import pdb; pdb.set_trace()
             grads.append(tf.gradients(loss_gen[i], all_params))
 
@@ -223,7 +225,7 @@ def main(args):
                 loss_prior_test.append(tf.reduce_sum(spherical_Gaussian_NLL(u)))
                 loss_j_test.append(-tf.reduce_sum(log_dets))
                 # eqn 27 MAF
-                extra_bpd_term_test.append(-np.log2(1 - 2*ALPHA) + 8 + (tf.reduce_mean(tf.nn.softplus(x)) + tf.reduce_mean(tf.nn.softplus(1-x))) / np.log(2.))
+                extra_bpd_term_test.append(-np.log2(1 - 2*ALPHA) + 8 + (tf.reduce_mean(tf.log(tf.nn.sigmoid(x))) + tf.reduce_mean(tf.log(1 - tf.nn.sigmoid(x)))) / np.log(2.))
 
 
     # add losses and gradients together and get training updates
@@ -232,6 +234,9 @@ def main(args):
         for i in range(1, args.nr_gpu): # add all the losses and gradients from GPUs1+ to those from GPU0
             loss_gen[0] += loss_gen[i]
             loss_gen_test[0] += loss_gen_test[i]
+            if args.model != 'dk_CNN': # TODO: do we need to do it that way?  can't we just do a mean?
+                extra_bpd_term[0] += extra_bpd_term[i]
+                extra_bpd_term_test[0] += extra_bpd_term_test[i]
             for j in range(len(grads[0])):
                 grads[0][j] += grads[i][j]
 
@@ -265,10 +270,10 @@ def main(args):
     norm_const *= total_gpus / num_tasks
     bits_per_dim = loss_gen[0] / norm_const
     bits_per_dim_test = loss_gen_test[0] / norm_const
-    #TODO: extra terms of eqn 27 (MAF)
-    if model != 'dk_CNN':
-        bits_per_dim += extra_bpd_term
-        bits_per_dim_test += extra_bpd_term_test
+    # extra terms of eqn 27 (MAF) (FIXME: extra_bpd_term is a LIST!??!?)
+    if args.model != 'dk_CNN':
+        bits_per_dim += (extra_bpd_term[0] / total_gpus)
+        bits_per_dim_test += (extra_bpd_term_test[0] / total_gpus)
 
     bits_per_dim = tf.check_numerics(bits_per_dim, 'train loss is nan')
     bits_per_dim_test = tf.check_numerics(bits_per_dim_test, 'test loss is nan')
@@ -440,6 +445,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # DK (TODO: restore defaults!)
+    parser.add_argument('--attn_rep', type=int, default=12)
     parser.add_argument('--n_ex', type=int, default=45000)
     parser.add_argument('--n_flows', type=int, default=2)
     parser.add_argument('--n_flow_params', type=int, default=2)
