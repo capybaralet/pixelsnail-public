@@ -139,7 +139,7 @@ def main(args):
     if args.class_conditional:
         raise NotImplementedError
         num_labels = train_data.get_num_labels()
-        y_init = tf.placeholder(tf.int32, shape=(args.init_batch_size,))
+        _init = tf.placeholder(tf.int32, shape=(args.init_batch_size,))
         h_init = tf.one_hot(y_init, num_labels)
         y_sample = np.split(
                 np.mod(np.arange(args.batch_size), num_labels), args.nr_gpu)
@@ -422,7 +422,7 @@ def main(args):
             # save performance and time info every epoch
             np.savetxt(os.path.join(save_dir, args.model + '_test_bpd.txt'), test_bpd, fmt='%1.3f')
             np.savetxt(os.path.join(save_dir, args.model + '_train_bpd.txt'), train_bpd, fmt='%1.3f')
-            np.savetxt(os.path.join(save_dir, args.model + '_times.txt'), times, fmt='%1.0f')
+            np.savetxt(os.path.join(save_dir, args.model + '_times.txt'), times, fmt='%1.2f')
 
         lprint("loss components")
         lprint(sess.run(loss_prior))

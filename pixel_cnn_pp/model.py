@@ -53,11 +53,8 @@ def DSF1(x, AR_x):
 
     # extract flow params
     AR_x = tf.reshape(AR_x, x_shp + [-1, 3])
-    AR_x *= 1.
+    AR_x *= 1. # can amplify initialization randomness here
     pre_a, b, w_logits = tf.unstack(AR_x, axis=3)
-    #b *= 5.
-    #w_logits *= 5.
-    #pre_a *= 5.
     pre_a += np.log(np.exp(1) - 1) # sets a ~= 1
 
     a = tf.nn.softplus(pre_a)
