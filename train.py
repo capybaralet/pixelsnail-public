@@ -65,6 +65,8 @@ def main(args):
     else:
         dequantize = True
 
+    n_ex = args.n_ex / (args.nr_gpu * args.batch_size) * (args.nr_gpu * args.batch_size) 
+
     # initialize data loaders for train/test splits
     if args.data_set == 'imagenet' and args.class_conditional:
         raise("We currently don't have labels for the small imagenet data set")
@@ -74,21 +76,21 @@ def main(args):
         train_data = DataLoader(args.data_dir, 'train_', args.batch_size,
                                                         rng=rng, shuffle=True, return_labels=args.class_conditional,
                                                         dequantize=dequantize,
-                                                        n_ex=args.n_ex)
+                                                        n_ex=n_ex)
         test_data = DataLoader(args.data_dir, 'valid_', args.batch_size,
                                                      shuffle=False, return_labels=args.class_conditional,
                                                      dequantize=dequantize,
                                                      #n_ex=int(.25 * args.n_ex))
-                                                     n_ex=args.n_ex)
+                                                     n_ex=n_ex)
     else:
         train_data = DataLoader(args.data_dir, 'train', args.batch_size,
                                                         rng=rng, shuffle=True, return_labels=args.class_conditional,
                                                         dequantize=dequantize,
-                                                        n_ex=args.n_ex)
+                                                        n_ex=n_ex)
         test_data = DataLoader(args.data_dir, 'test', args.batch_size,
                                                      shuffle=False, return_labels=args.class_conditional,
                                                      dequantize=dequantize,
-                                                     n_ex=args.n_ex)
+                                                     n_ex=n_ex)
     obs_shape = train_data.get_observation_size()    # e.g. a tuple (32,32,3)
     assert len(obs_shape) == 3, 'assumed right now'
 
@@ -446,7 +448,7 @@ if __name__ == '__main__':
 
     # DK (TODO: restore defaults!)
     parser.add_argument('--attn_rep', type=int, default=12)
-    parser.add_argument('--n_ex', type=int, default=45000)
+    parser.add_argument('--n_ex', type=int, default=50000)
     parser.add_argument('--n_flows', type=int, default=2)
     parser.add_argument('--n_flow_params', type=int, default=2)
     parser.add_argument('--use_valid', type=int, default=1)
@@ -462,7 +464,7 @@ if __name__ == '__main__':
                                             help='Location for parameter checkpoints and samples')
     parser.add_argument('-d', '--data_set', type=str, default='cifar',
                                             help='Can be either cifar|imagenet')
-    parser.add_argument('-t', '--save_interval', type=int, default=10,
+    parser.add_argument('-t', '--save_interval', type=int, default=20,
                                             help='Every how many epochs to write checkpoint/samples?')
     parser.add_argument('-r', '--load_params', type=str,
                                             help='Restore training from previous model checkpoint?')
@@ -491,7 +493,7 @@ if __name__ == '__main__':
                                             help='How much data to use for data-dependent initialization.')
     parser.add_argument('-p', '--dropout_p', type=float, default=0.5,
                                             help='Dropout strength (i.e. 1 - keep_prob). 0 = No dropout, higher = more dropout.')
-    parser.add_argument('-x', '--max_epochs', type=int, default=5000,
+    parser.add_argument('-x', '--max_epochs', type=int, default=800,
                                             help='How many epochs to run in total?')
     parser.add_argument('-g', '--nr_gpu', type=int, default=None,
                                             help='How many GPUs to distribute the training across? Defaults to all.')

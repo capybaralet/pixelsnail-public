@@ -7,7 +7,8 @@ import time
 # TODO: try more flows!! 
 
 
-env = " --image=images.borgy.elementai.lan/pixel_snail -e PYTHONPATH=/mnt/AIDATA/home/david.krueger/dev/pixelsnail-public -v /mnt/AIDATA:/mnt/AIDATA --req-cores=8 --req-gpus=3 --req-ram-gbytes=24 "
+#env = " --image=images.borgy.elementai.lan/pixel_snail -e PYTHONPATH=/mnt/AIDATA/home/david.krueger/dev/pixelsnail-public -v /mnt/AIDATA:/mnt/AIDATA --req-cores=8 --req-gpus=3 --req-ram-gbytes=24 "
+env = " --image=images.borgy.elementai.lan/pixel_snail -e PYTHONPATH=/mnt/AIDATA/home/david.krueger/dev/pixelsnail-public -v /mnt/AIDATA:/mnt/AIDATA --req-cores=4 --req-gpus=1 --req-ram-gbytes=10 "
 
 grid = []
 grid += ['--nr_filters=128 --nr_resnet=4 --n_flows=2 --model=dk_IAF',
@@ -28,7 +29,7 @@ def mkdirs(path):
         os.makedirs(path)
 
 # TODO: names...
-names = ['DK_MAF3c' for _ in range(len(exps))]
+names = ['DK_MAF3d' for _ in range(len(exps))]
 
 i = 0
 for name, exp, save_dir in zip(names, exps, save_dirs):

@@ -1,4 +1,15 @@
-NTS: I'm DUMB I think I did these all with IAF instead of DSF (!?!?)
+
+
+12 experiments...
+2 DSF / IAF
+3 flows in [2,3,4]
+filters, depth, attn_rep
+
+lr = .001
+
+use larger dataset!
+
+
 
 python train.py --nr_resnet=3 --nr_filters=128 --init_batch_size=12 --batch_size=12 --n_ex=12
 python train.py --nr_resnet=3 --nr_filters=128 --init_batch_size=12 --batch_size=12 --n_ex=12

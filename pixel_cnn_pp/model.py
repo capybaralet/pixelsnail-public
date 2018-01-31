@@ -32,7 +32,7 @@ def IAF(x, AR_x):
     mu, pre_sigma = tf.unstack(AR_x, axis=2)
     mu.shape.assert_is_compatible_with(x.shape)
     #pre_sigma += 3.  # favors transparency of the layers.
-    pre_sigma += 1.  # favors transparency of the layers.
+    pre_sigma += 1.
     #sigma = tf.sigmoid(pre_sigma)
     sigma = tf.nn.softplus(pre_sigma)
     x = sigma * x + mu
